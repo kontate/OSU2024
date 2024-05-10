@@ -1,0 +1,282 @@
+/* This file is originally made by danielbierwirth as shown in
+     https://gist.github.com/danielbierwirth/0636650b005834204cb19ef5ae6ccedb
+
+   T.Narumi modified for MagicMirror
+*/
+using UnityEngine;
+using UnityEngine.Diagnostics;
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Net.Sockets;
+using System.Text;
+using System.Threading;
+using System.IO;
+
+public class TCPTestClient : MonoBehaviour {  	
+#region private members 	
+	private TcpClient[] socketConnection = new TcpClient[10]; 	
+  	private Thread[] clientReceiveThread = new Thread[10];
+  //        private int framecounter;
+        private int serverNum = 1;// Added by T.Narumi
+	private string[] addr = new string[10];// Added by T.Narumi
+	private StreamReader fileReader = null;// Added by T.Narumi
+	private string sLine = "";// Added by T.Narumi
+	private bool[] isFinished = new bool[10]; // Added by T.Narumi
+	private bool isFinishedAll = false; // Added by T.Narumi
+        private float ctime=0.0f;// Added by T.Narumi
+	private float[] ttime = new float[10];
+  //	private bool[] ftime = new bool[10];
+#endregion  	
+        public int port = 5000;
+  
+	[Tooltip("you can specify server IP addresses up to 10 sites")]
+        public string serverAddrFile = "ServerAddr.txt"; // Added by T.Narumi
+  
+	[Tooltip("if blank, serverAddrFile is used")]
+	public string serverAddr = "";
+	// Use this for initialization 	
+	void Start () {
+	  /*		try {  			
+		        socketConnection = new TcpClient(serverAddr, port);  			
+			Debug.Log("Succeed to connect server"); 		
+		} 		
+		catch (Exception e) { 			
+			Debug.Log("On client connect exception " + e); 		
+			} 	*/
+		//		framecounter = 0;
+	  
+	  // Added by T.Narumi
+	  addr[0] = "127.0.0.1";
+	  if(serverAddr!=""){
+	    addr[0] = serverAddr;
+	  } else if(File.Exists(serverAddrFile)) {
+	    Debug.Log("Trying to read IP address from " + serverAddrFile);
+	    fileReader = new StreamReader(serverAddrFile);
+	    if(fileReader!=null){
+	      serverNum = 0;
+	      sLine = fileReader.ReadLine();
+	      while(sLine!=null && serverNum<10){
+		if(sLine.Length>=7){
+		  Debug.Log("addr[" + serverNum + "] is " + sLine);
+		  addr[serverNum] = sLine;
+		  serverNum++;
+		}
+		sLine = fileReader.ReadLine();
+	      }
+	      fileReader.Close();
+	    } else {
+	      Debug.Log("Failed to read IP address from " + serverAddrFile);
+	    }
+	  }
+	  for(int i=0;i<serverNum;i++){
+	    Debug.Log("addr[" + i + "]=" + addr[i]);
+	    ttime[i]=-99.9f;
+	    isFinished[i]=false;
+	    //	    ftime[i]=false;
+	  }
+	  
+	  ConnectToTcpServer();
+	}  	
+	// Update is called once per frame
+	void Update () {
+	  SendMessage();         
+
+	  ctime=Time.time;
+	  for(int s=0;s<serverNum;s++){
+	    if(socketConnection[s]!=null && ttime[s]>0.0 && ctime-ttime[s]>5.0){
+	      isFinished[s] = true;
+	      NetworkStream stream = socketConnection[s].GetStream();
+	      if(stream!=null) stream.Close();
+	      socketConnection[s].Close();
+	      socketConnection[s]=null;
+	      clientReceiveThread[s].Abort();
+	      //	      ftime[s]=true;
+	      Debug.Log("in Update ctime=" + ctime + ", ttime[" + s + "]=" + ttime[s] + " was closed\n");
+	      ttime[s] = -99.9f;
+	    }
+	    //	    Debug.Log("IsAlive[" + s + "]=" + clientReceiveThread[s].IsAlive);
+	    if(clientReceiveThread[s].IsAlive == false && socketConnection[s] == null){
+	      try {  			
+		clientReceiveThread[s] = new Thread (new ParameterizedThreadStart(ListenForData));// Modified by T.Narumi
+		clientReceiveThread[s].IsBackground = true; 			
+		clientReceiveThread[s].Start(s);
+		Debug.Log("Succeed to start a new thread to connect to a server in Update, s=" + s);
+		ttime[s] = -99.9f;
+	      } 		
+	      catch (Exception e) { 			
+		Debug.Log("On client connect exception in Update, s=" + s + ": " + e); 		
+	      }
+	    }
+	  }
+	  /*	  if (Input.GetKeyDown(KeyCode.P)) {             
+		SendMessage();         
+		} */
+	  /*	  if(framecounter % 10 != 0){
+	    //	    ListenForDataOnce();
+	    SendMessage();
+	    //	    ListenForDataOnce();
+	  }
+	  framecounter++;*/
+	}
+
+	void OnApplicationQuit() {
+	  isFinishedAll = true;
+	  for(int s=0;s<serverNum;s++){
+	    isFinished[s] = true;
+	    if(clientReceiveThread[s] != null){
+	      NetworkStream stream = socketConnection[s].GetStream();
+	      if(stream!=null) stream.Close();
+	      socketConnection[s].Close();
+	      clientReceiveThread[s].Abort();
+	    }
+	  }
+	}
+  
+	/// <summary> 	
+	/// Setup socket connection. 	
+	/// </summary> 	
+        private void ConnectToTcpServer () {
+	  for(int s=0; s<serverNum; s++){
+		try {  			
+		  //			clientReceiveThread[s] = new Thread (new ThreadStart(ListenForData)); 			
+		        clientReceiveThread[s] = new Thread (new ParameterizedThreadStart(ListenForData));// Modified by T.Narumi
+			clientReceiveThread[s].IsBackground = true; 			
+			clientReceiveThread[s].Start(s);
+			Debug.Log("Succeed to start a new thread to connect to a server"); 		
+		} 		
+		catch (Exception e) { 			
+			Debug.Log("On client connect exception in ConnectToTcpServer: " + e); 		
+		}
+	  }
+	  for(int s=0; s<serverNum; s++){
+	    if(clientReceiveThread[s].IsAlive == false){
+	      Debug.Log("clientReceiveThread[" + s + "] is false");
+	    }
+	  }
+        }  	
+	/// <summary> 	
+	/// Runs in background clientReceiveThread; Listens for incomming data. 	
+	/// </summary>
+  /*        private void ListenForDataOnce() {// Added by T.Narumi
+		try { 			
+			Byte[] bytes = new Byte[1024];             
+			// Get a stream object for reading
+			if(socketConnection == null){
+			  Debug.Log("socketConnection is null in ListenForDataOnce");
+			}
+			else{
+			  NetworkStream stream = socketConnection.GetStream();
+			  int length; 					
+			  // Read incomming stream into byte arrary. 					
+			  if ((length = stream.Read(bytes, 0, bytes.Length)) != 0) {
+			    var incommingData = new byte[length]; 						
+			    Array.Copy(bytes, 0, incommingData, 0, length); 						
+			    // Convert byte array to string message. 						
+			    string serverMessage = Encoding.ASCII.GetString(incommingData);
+			    Debug.Log("server message received as: " + serverMessage); 					
+			  } 				
+			} 			
+		}         
+		catch (SocketException socketException) {             
+			Debug.Log("Socket exception: " + socketException);         
+		}     
+		}*/
+
+	private void ListenForData(object o) {
+	          int s = (int) o;
+	  ListenForDataStart:
+	          try { 			
+		  //		        socketConnection = new TcpClient(serverAddr, port);
+		  // Modified by T.Narumi
+		    if(socketConnection[s] == null){
+//				Debug.Log("try to TcpClient(" + addr[s] + ":" + port);
+				isFinished[s] = false;
+ 		        socketConnection[s] = new TcpClient(addr[s], port);
+			} else {
+//				Debug.LogError("socketConnection[" + s + "] is not null but new TCP connection is requested");
+				Utils.ForceCrash( ForcedCrashCategory.FatalError );
+				Utils.ForceCrash( ForcedCrashCategory.Abort );
+			}
+		    //		        socketConnection[s] = null;
+			//			ttime[s] = ctime;
+			Byte[] bytes = new Byte[4096];             
+			while (true) { 				
+				// Get a stream object for reading
+			        if(isFinished[s] == true || isFinishedAll == true){
+//						Debug.Log("isFinished[" + s + "]=" + isFinished[s] + ", isFinishedAll=" + isFinishedAll);
+						socketConnection[s].Close();
+						socketConnection[s] = null;
+						break;
+					} // Added by T.Narumi
+				/*				if(ftime[s] == true){
+				  ftime[s] = false;
+				  break;
+				  }*/
+			        if(socketConnection[s] == null){
+//				        Debug.Log("socketConnection[" + s + "] is null in ListenForData, sleeping a second");
+					// added by T.Narumi
+					Thread.Sleep(1000);// wait a second
+					//socketConnection[s] = new TcpClient(addr[s], port);  			
+			        }
+				using (NetworkStream stream = socketConnection[s].GetStream()) { 					
+					int length; 					
+					// Read incomming stream into byte arrary. 	
+									
+					while (stream.CanRead == true){
+//					while (true){
+					  if((length = stream.Read(bytes, 0, bytes.Length)) != 0) { 						
+//					while ((length = stream.Read(bytes, 0, bytes.Length)) != 0) { 						
+						var incommingData = new byte[length]; 						
+						Array.Copy(bytes, 0, incommingData, 0, length); 						
+						// Convert byte array to string message. 						
+						string serverMessage = Encoding.ASCII.GetString(incommingData); 						
+//						Debug.Log("server message [" + s + "] at " + ctime + " received as: " + serverMessage);
+						ttime[s]=ctime;
+					  }
+					} 
+					isFinished[s] = true;				
+				} 			
+			}         
+		}         
+		catch (SocketException socketException) {             
+//			Debug.Log("Socket[" + s + "] exception in ListenForData: " + socketException);
+			// Added by T.Narumi
+			Thread.Sleep(4000);
+//			Debug.Log("  isFinished[" + s + "]=" + isFinished[s] + ", isFinishedAll=" + isFinishedAll);
+			if(isFinished[s] == false && isFinishedAll == false) goto ListenForDataStart;
+		}     
+	}  	
+	/// <summary> 	
+	/// Send message to server using socket connection. 	
+	/// </summary> 	
+	private void SendMessage() {
+	  for(int s=0; s<serverNum; s++){
+	  //	        Debug.Log("SendMessage is called");
+	        if (socketConnection[s] == null) {             
+		  //		        Debug.Log("socketConnection[" + s + "] is null");
+			//			return;
+			continue;
+		}  		
+		try { 			
+			// Get a stream object for writing. 			
+			NetworkStream stream = socketConnection[s].GetStream(); 			
+			if (stream.CanWrite) {                 
+			  //				string clientMessage = "This is a message from one of your clients.";
+				string clientMessage = KinectSocketPlayer.Instance.GetRecordMessage();
+				// Convert string message to byte array.                 
+				byte[] clientMessageAsByteArray = Encoding.ASCII.GetBytes(clientMessage); 				
+				// Write byte array to socketConnection stream.                 
+				stream.Write(clientMessageAsByteArray, 0, clientMessageAsByteArray.Length);
+				stream.Flush();
+				//				Debug.Log("Client sent his message - should be received by server[" + s + "]: " + clientMessage);             
+			} else {
+			  //			        Debug.Log("stream[" + s + "].CanWrite is null");
+			}
+		} 		
+		catch (SocketException socketException) {             
+			Debug.Log("Socket[" + s + "] exception in SendMessage: " + socketException);         
+		}
+	  }
+	} 
+}

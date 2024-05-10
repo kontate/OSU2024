@@ -1,0 +1,117 @@
+﻿/* Original scripte is written by 220Rn from
+     https://blog.applibot.co.jp/2018/08/13/socket-communication-with-unity/
+   T.Narumi has modified for MagicMirror application
+*/
+
+using UnityEngine;
+using System.Collections.Generic;
+using System.Net.NetworkInformation;
+using System.IO;
+
+/*
+ * TestServer.cs
+ * SocketServerを継承、開くポートを指定して、送受信したメッセージを具体的に処理する
+ */
+namespace Script.SocketServer
+{
+  public class ServerTest : SocketServer {
+#pragma warning disable 0649
+    // ポート指定（他で使用していないもの、使用されていたら手元の環境によって変更）
+    [SerializeField]private int _port = 5000;
+    private StreamReader fileReader = null;// Added by T.Narumi
+    private string sLine = ""; // Added by T.Narumi
+#pragma warning restore 0649
+    private float ctime=0.0f;
+    
+    [Tooltip("you can specify IP address of client or server itself")]
+    public string IPAddrFile = "IPAddr.txt"; // Added by T.Narumi
+					   
+    private void Start(){
+      // 接続中のIPアドレスを取得
+      string ipAddress="";
+      if(File.Exists(IPAddrFile)){
+	Debug.Log("Trying to read IP address from " + IPAddrFile);
+	fileReader = new StreamReader(IPAddrFile);
+	if(fileReader!=null){
+	  sLine = fileReader.ReadLine();
+	  if(sLine!=null){
+	    ipAddress = sLine;
+	  }
+	}
+      } else {
+	Debug.Log("Failed to read IP address from " + IPAddrFile);
+      }
+      if(ipAddress != ""){
+	Debug.Log(ipAddress);
+      } else {
+	foreach (var ni in NetworkInterface.GetAllNetworkInterfaces()){
+	  if (ni.NetworkInterfaceType == NetworkInterfaceType.Wireless80211 ||
+	      ni.NetworkInterfaceType == NetworkInterfaceType.Ethernet){
+	    foreach (var ip in ni.GetIPProperties().UnicastAddresses){
+	      if (ip.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork){
+		ipAddress = ip.Address.ToString();
+		Debug.Log(ipAddress);
+	      }
+	    }
+	  }
+	}
+      }
+      
+      // 指定したポートを開く
+      Listen(ipAddress, _port);
+      
+      // システムに接続情報をセット（表示用）
+      //      MyViewer.Instance.SetIpAddressPort (ipAddress + ":" + _port);
+    }
+
+    private void Update(){
+        //        if(_clients.Count != _clients_time.Count){
+        if(false){
+	  Debug.Log("in ServerTest Update: count=" + _clients.Count + ":" + _clients_time.Count + ", time=");
+	  foreach(var t in _clients_time) Debug.Log("   " + t);
+        }
+	ctime=Time.time;
+  // 4秒以上クライアントから応答がないとサーバー側から切る
+  List<int> close_index = new List<int>();
+	for(int i=0;i<_clients_time.Count;i++){
+	  if(_clients_time[i] > 0.0f && Time.time > _clients_time[i] + 4.0f){
+	    close_index.Add(i);
+	  }
+	}
+	foreach(int i in close_index){
+	  Debug.Log("Closing client=" + i + ", Time.time=" + Time.time + ", _clients_time=" + _clients_time[i]);
+	  Debug.Log("  count=" + _clients.Count + ":" + _clients_time.Count);
+	}
+	if(close_index.Count>0) base.CloseClients(close_index);
+  
+    }
+    
+    // クライアントからメッセージ受信
+    protected override void OnMessage(int client_count, int client_index, string msg){
+      base.OnMessage(client_count,client_index,msg);
+      
+      // ------------------------------------------------
+      // あとは送られてきたメッセージによって何かしたいことを書く
+      // ------------------------------------------------
+      _clients_time[client_index]=ctime;
+      SendMessageToClient (client_index, "Accept, client_index=" + client_index);
+      //SendMessageToClient (client_index, "Accept count=" + _clients.Count + ":" + _clients_time.Count + ", from client_index=" + client_index + " msg:"+ msg +"\n");
+      KinectSocketPlayer.Instance.SetPlayMessage(client_count,client_index,msg);
+
+      /*
+      // 今回は受信した整数値を表示用システムにセットする
+      int num;
+      // 整数値以外は何もしない
+      if (int.TryParse (msg, out num)) {
+	// ビュアーに値をセットする
+	//	MyViewer.Instance.SetNum (num);
+	KinectSocketPlayer.Instance.SetNum(num);
+	// クライアントに受領メッセージを返す
+	SendMessageToClient ("Accept:"+ num+"\n");
+      } else {
+	// クライアントにエラーメッセージを返す
+	SendMessageToClient ("Error\n");
+	}*/
+    }
+  }
+}

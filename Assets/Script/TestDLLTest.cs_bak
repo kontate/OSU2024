@@ -1,0 +1,33 @@
+﻿using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using DLLTest;
+
+public class TestDLLTest : MonoBehaviour
+{
+    private int count = 0;
+    // Start is called before the first frame update
+    private Class1 c1 = new Class1();
+
+    void Start()
+    {
+        c1.RegisterHandler();
+        //        Debug.Log("isVolumeUp is " + Class1.isVolumeUp());
+    }
+
+    // Update is called once per frame
+    void Update()
+    {
+        if (count % 100 == 0)
+        {
+            Debug.Log("isVolumeDown is " + c1.isVolumeDown());
+            Debug.Log("isVolumeUp is " + c1.isVolumeUp());
+        }
+        count++;
+    }
+
+    void OnApplicationQuit()
+    {
+        c1.UnregisterHandler();
+    }
+}

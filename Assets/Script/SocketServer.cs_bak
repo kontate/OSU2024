@@ -1,0 +1,169 @@
+﻿// Modified by T.Narumi
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using UnityEngine;
+using UnityEngine.Diagnostics;
+
+/*
+ * SocketServer.cs
+ * ソケット通信（サーバ）
+ * Unityアプリ内にサーバを立ててメッセージの送受信を行う
+ */
+namespace Script.SocketServer
+{
+	public class SocketServer : MonoBehaviour {
+		private TcpListener _listener;
+	  //		private readonly List<TcpClient> _clients = new List<TcpClient>();
+		protected readonly List<TcpClient> _clients = new List<TcpClient>();
+		protected readonly List<float> _clients_time = new List<float>();// Added by T.Narumi
+
+		// ソケット接続準備、待機
+		protected void Listen(string host, int port){
+			Debug.Log("ipAddress:"+host+" port:"+port);
+			var ip = IPAddress.Parse(host);
+			_listener = new TcpListener(ip, port);
+			_listener.Start();
+			_listener.BeginAcceptSocket(DoAcceptTcpClientCallback, _listener);
+		}
+		
+		// クライアントからの接続処理
+		private void DoAcceptTcpClientCallback(IAsyncResult ar) {
+			var listener = (TcpListener)ar.AsyncState;
+			var client = listener.EndAcceptTcpClient(ar);
+			int i;
+			for(i=0; i<_clients.Count;i++){
+				char[] delimiters = { ':' };
+				char[] delimiters2 = { ',' };
+				string [] sprev = _clients[i].Client.RemoteEndPoint.Serialize().ToString().Split(delimiters);
+				string [] scrnt = client.Client.RemoteEndPoint.Serialize().ToString().Split(delimiters);
+				// check if the IP address is the same as previous client
+				string [] sprevIP = sprev[2].Split(delimiters2);
+				string [] scrntIP = scrnt[2].Split(delimiters2);
+				if(sprevIP[2] == scrntIP[2] && sprevIP[3] == scrntIP[3] && sprevIP[4] == scrntIP[4] && sprevIP[5] == scrntIP[5]){
+					Debug.Log("sprev=" + sprev[0] + " " + sprev[1] + " " + sprev[2] + ", scrnt=" + scrnt[0] + " " + scrnt[1] + " " + scrnt[2]);
+					Debug.LogError("i=" + i + " same IP address=" + _clients[i].Client.RemoteEndPoint + " " + client.Client.RemoteEndPoint);
+					Utils.ForceCrash( ForcedCrashCategory.FatalError );
+					Utils.ForceCrash( ForcedCrashCategory.Abort );
+				}
+			}
+			_clients.Add(client);
+			_clients_time.Add(-100.0f);
+			Debug.Log("Connect: "+client.Client.RemoteEndPoint);
+
+			// 接続が確立したら次の人を受け付ける
+			listener.BeginAcceptSocket(DoAcceptTcpClientCallback, listener);
+
+			// 今接続した人とのネットワークストリームを取得
+			var stream = client.GetStream();
+			var reader = new StreamReader(stream,Encoding.UTF8);
+
+			// 接続が切れるまで送受信を繰り返す
+			while (client.Connected) {
+				while (!reader.EndOfStream){
+				        // Added by T.Narumi
+//				        Debug.Log("total clients=" + _clients.Count + ":" + _clients_time.Count + ", _client_time is "+_clients_time[_clients.IndexOf(client)] + ", myclient=" + client.Client.RemoteEndPoint);
+					/*					if(_clients_time[_clients.IndexOf(client)]>30.0f){
+					  Debug.Log("Closing client since 30 seconds has past");
+					  OnMessage(-1,"");
+					  CloseClient(_clients.IndexOf(client));
+					  }*/
+					
+					// 一行分の文字列を受け取る
+					var str = reader.ReadLine ();
+					//					OnMessage(_clients.IndexOf(client),str);
+//					Debug.Log("  str length=" + str.Length);
+					if(str.Length>4000) Debug.LogError("str length is too large");
+					OnMessage(_clients.Count,_clients.IndexOf(client),str);
+//					OnMessage(_clients.Count,_clients.IndexOf(client),"-5|kb,18264576583100000,6,25,0,0,0,0,0,0");
+				}
+
+				// クライアントの接続が切れたら
+				if (client.Client.Poll(1000, SelectMode.SelectRead) && (client.Client.Available == 0)) {
+					Debug.Log("Disconnect: "+client.Client.RemoteEndPoint);
+					client.Close();
+					//					KinectSocketPlayer.Instance.SetPlayMessage(_clients.Count,_clients.IndexOf(client),"0.0|kb,18264576583100000,6,25,0,0,0,0,0");
+					KinectSocketPlayer.Instance.SetPlayMessage(_clients.Count,_clients.IndexOf(client),"");
+					_clients_time.RemoveAt(_clients.IndexOf(client));
+					_clients.Remove(client);
+					break;
+				}
+
+			}
+			Debug.Log("client=" + client.Client.RemoteEndPoint + " is not connected");
+		}
+
+	        // Added by T.Narumi
+	  /*  	        protected void CloseClient(int client_index){
+			  Debug.Log("Disconnect: "+ _clients[client_index].Client.RemoteEndPoint);
+			  KinectSocketPlayer.Instance.SetPlayMessage(_clients.Count,client_index,"");
+			  _clients[client_index].Close();
+			  _clients_time.RemoveAt(client_index);
+			  _clients.RemoveAt(client_index);
+			  }*/
+	        protected void CloseClients(List<int> close_index){
+		  Debug.Log("in CloseClients s: count=" + _clients.Count +":" + _clients_time.Count + ", close_index=" + close_index.Count + " " + close_index);
+		  // 逆順にソート
+		  close_index.Sort((a, b) => b - a);
+		  foreach(int i in close_index){ 
+		    Debug.Log("in CloseClients, Disconnect: i=" + i + " " + _clients[i].Client.RemoteEndPoint);
+		    //		    KinectSocketPlayer.Instance.SetPlayMessage(_clients.Count,i,"0.0|kb,18264576583100000,6,25,0,0,0,0,0");
+		    KinectSocketPlayer.Instance.SetPlayMessage(_clients.Count,i,"");
+		    _clients[i].Close();
+		  }
+		  foreach(int i in close_index){
+		    _clients_time.RemoveAt(i);
+		    _clients.RemoveAt(i);
+		  }
+		  Debug.Log("in CloseClients e: count=" + _clients.Count +":" + _clients_time.Count + ", close_index=" + close_index.Count + " " + close_index);
+		}
+
+		// メッセージ受信
+		protected virtual void OnMessage(int client_count, int client_index, string msg){
+//			Debug.Log("in SocketServer count=" + _clients.Count + ":" + _clients_time.Count + ", client_index=" + client_index + " msg:" + msg);
+		}
+
+		// クライアントにメッセージ送信
+		protected void SendMessageToClient(int client_index, string msg){
+			if (_clients.Count == 0){
+				return;
+			}
+			var body = Encoding.UTF8.GetBytes(msg);
+
+			// 全員に同じメッセージを送る⇒送ってきた相手にだけ返事をする(Modified by T.Narumi)
+			//foreach(var client in _clients){
+			{
+			  var client = _clients[client_index];
+				try{
+					var stream = client.GetStream();
+					stream.Write(body, 0, body.Length);
+				}catch {
+				        Debug.Log("in SendMessageToClient: cannot write to client=" + client.Client.RemoteEndPoint);
+				        /*Debug.Log("in SendMessageToClient: closing client=" + client.Client.RemoteEndPoint);
+				        client.Close(); // Added by T.Narumi
+					KinectSocketPlayer.Instance.SetPlayMessage(_clients.Count,_clients.IndexOf(client),"");
+					_clients_time.RemoveAt(_clients.IndexOf(client));
+					_clients.Remove(client);*/
+				}
+			}
+		}
+
+		// 終了処理
+		protected virtual void OnApplicationQuit() {
+			if (_listener == null){
+				return;
+			}
+
+			if (_clients.Count != 0){
+				foreach(var client in _clients){
+					client.Close();
+				}
+			}
+			_listener.Stop();
+		}
+
+	}
+}
